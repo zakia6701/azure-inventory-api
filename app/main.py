@@ -1,7 +1,13 @@
+import sqlite3
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
+from app.database import get_connection, init_db
+
 app = FastAPI(title="Inventory API")
+
+init_db()
 
 
 class Product(BaseModel):
@@ -9,10 +15,6 @@ class Product(BaseModel):
     sku: str
     price: float
     quantity: int
-
-
-products: dict[int, Product] = {}
-next_id = 1
 
 
 @app.get("/")
@@ -27,19 +29,36 @@ def health_check():
 
 @app.post("/products", status_code=201)
 def create_product(product: Product):
-    global next_id
-    products[next_id] = product
-    next_id += 1
-    return {"id": next_id - 1, **product.model_dump()}
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "INSERT INTO products (name, sku, price, quantity) VALUES (?, ?, ?, ?)",
+            (product.name, product.sku, product.price, product.quantity),
+        )
+        conn.commit()
+        product_id = cursor.lastrowid
+    except sqlite3.IntegrityError:
+        raise HTTPException(status_code=409, detail="SKU already exists")
+    finally:
+        conn.close()
+    return {"id": product_id, **product.model_dump()}
 
 
 @app.get("/products")
 def list_products():
-    return [{"id": pid, **p.model_dump()} for pid, p in products.items()]
+    conn = get_connection()
+    rows = conn.execute("SELECT * FROM products").fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
 
 
 @app.get("/products/{product_id}")
 def get_product(product_id: int):
-    if product_id not in products:
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT * FROM products WHERE id = ?", (product_id,)
+    ).fetchone()
+    conn.close()
+    if row is None:
         raise HTTPException(status_code=404, detail="Product not found")
-    return {"id": product_id, **products[product_id].model_dump()}
+    return dict(row)

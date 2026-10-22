@@ -11,3 +11,7 @@ venv/
 .terraform/
 *.tfstate
 *.tfstate.backup
+
+*.db
+
+*.db
